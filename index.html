@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Coup Game</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            background: #1a1a2e;
+            color: white;
+            text-align: center;
+            padding: 20px;
+        }
+        .room {
+            background: #16213e;
+            border-radius: 15px;
+            padding: 20px;
+            max-width: 500px;
+            margin: 0 auto;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+        }
+        button {
+            background: #e94560;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: 0.3s;
+        }
+        button:disabled {
+            background: #4a4a4a;
+        }
+        .player {
+            display: inline-block;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 10px;
+            margin: 5px;
+            border-radius: 5px;
+            min-width: 100px;
+        }
+        .card {
+            display: inline-block;
+            width: 60px;
+            height: 90px;
+            background: white;
+            color: black;
+            border-radius: 8px;
+            margin: 5px;
+            line-height: 90px;
+            font-size: 20px;
+            font-weight: bold;
+            cursor: pointer;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+        }
+        .actions {
+            margin-top: 20px;
+        }
+        #gameLog {
+            height: 100px;
+            overflow-y: auto;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 20px;
+            text-align: left;
+        }
+    </style>
+    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-database-compat.js"></script>
+</head>
+<body>
+    <div class="room" id="lobby">
+        <h1>🎴 Coup Game</h1>
+        <p>Room ID: <strong id="roomId">...</strong></p>
+        <input type="text" id="nickname" placeholder="Your nickname">
+        <button onclick="joinRoom()">Join Room</button>
+        
+        <div id="playersList"></div>
+        <button id="startBtn" onclick="startGame()" disabled>Start Game (3/5)</button>
+    </div>
+
+    <div class="room" id="gameScreen" style="display: none;">
+        <h2>🔄 <span id="currentPlayer"></span>'s turn</h2>
+        <p>Coins: <span id="coins">0</span> | Influence: <span id="influence">2</span></p>
+        
+        <div id="opponents"></div>
+        
+        <h3>Your Cards:</h3>
+        <div id="playerCards"></div>
+        
+        <div class="actions" id="actionButtons">
+            <button onclick="takeAction('income')">Income (+1)</button>
+            <button onclick="takeAction('foreign_aid')">Foreign Aid (+2)</button>
+            <button onclick="takeAction('coup')">Coup (-7)</button>
+            <button onclick="takeAction('duke')">Duke (+3)</button>
+            <button onclick="takeAction('assassin')">Assassin (-3)</button>
+            <button onclick="takeAction('captain')">Captain (Steal 2)</button>
+            <button onclick="takeAction('ambassador')">Ambassador (Swap)</button>
+        </div>
+        
+        <div id="gameLog"></div>
+    </div>
+
+    <script>
+        // Firebase configuration - replace with your own
+        const firebaseConfig = {
+            apiKey: "AIzaSyDKcOb1P4fXeo2c5wNF3hm_YzgLutLTD5o",
+            authDomain: "coup5game.firebaseapp.com",
+            databaseURL: "https://coup5game-default-rtdb.europe-west1.firebasedatabase.app",
+            projectId: "coup5game",
+            storageBucket: "coup5game.firebasestorage.app",
+            messagingSenderId: "1055163007218",
+            appId: "1:1055163007218:web:0adc7695876e4da59c906b",
+            measurementId: "G-0VF2K90J42"
+        };
+
+        // Initialize Firebase
+        firebase.initializeApp(firebaseConfig);
+        const database = firebase.database();
+
+        // Game variables
+        let roomId = window.location.hash.substring(1) || generateRoomId();
+        let playerId = generatePlayerId();
+        let isHost = false;
+        let gameData = {};
+        let playerCards = [];
+
+        // Character cards
+        const CHARACTERS = ['Duke', 'Assassin', 'Captain', 'Ambassador', 'Contessa'];
+        const CHARACTER_SYMBOLS = {
+            'Duke': '🏰', 'Assassin': '🗡️', 'Captain': '🏴‍☠️', 
+            'Ambassador': '🎩', 'Contessa': '👑'
+        };
+
+        // Initialize the game
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('roomId').textContent = roomId;
+        });
+
+        function generateRoomId() {
+            return Math.random().toString(36).substring(2, 6).toUpperCase();
+        }
+
+        function generatePlayerId() {
+            return 'player_' + Math.random().toString(36).substring(2, 6);
+        }
+
+        function joinRoom() {
+            const nickname = document.getElementById('nickname').value.trim();
+            if (!nickname) return alert('Please enter a nickname!');
+
+            const playerRef = database.ref(`rooms/${roomId}/players/${playerId}`);
+            
+            playerRef.set({
+                nickname: nickname,
+                isHost: false,
+                ready: false,
+                coins: 2,
+                cards: [],
+                revealed: []
+            });
+
+            // Listen for room changes
+            database.ref(`rooms/${roomId}`).on('value', (snapshot) => {
+                gameData = snapshot.val() || {};
+                updateLobby();
+                
+                if (gameData.gameStarted) {
+                    startGameUI();
+                }
+            });
+        }
+
+        function updateLobby() {
+            const players = gameData.players || {};
+            const container = document.getElementById('playersList');
+            container.innerHTML = '<h3>Players:</h3>';
+            
+            let playerCount = 0;
+            Object.entries(players).forEach(([id, player]) => {
+                container.innerHTML += `
+                    <div class="player">
+                        ${player.nickname} ${player.isHost ? '👑' : ''}
+                    </div>
+                `;
+                playerCount++;
+                
+                if (id === playerId) {
+                    isHost = player.isHost;
+                }
+            });
+
+            document.getElementById('startBtn').disabled = !(isHost && playerCount >= 3);
+            document.getElementById('startBtn').textContent = `Start Game (${playerCount}/5)`;
+        }
+
+        function startGame() {
+            if (!isHost) return;
+            
+            // Initialize game state
+            const players = gameData.players || {};
+            const playerIds = Object.keys(players);
+            const allCards = shuffleArray([...CHARACTERS, ...CHARACTERS, ...CHARACTERS]);
+            
+            // Deal cards to players
+            playerIds.forEach((id, index) => {
+                const cards = allCards.slice(index * 2, index * 2 + 2);
+                database.ref(`rooms/${roomId}/players/${id}`).update({
+                    cards: cards,
+                    revealed: [false, false],
+                    coins: 2,
+                    ready: false
+                });
+            });
+            
+            // Set first player
+            database.ref(`rooms/${roomId}`).update({
+                gameStarted: true,
+                currentPlayer: playerIds[0],
+                turn: 0,
+                gameLog: ['Game started!']
+            });
+        }
+
+        function startGameUI() {
+            document.getElementById('lobby').style.display = 'none';
+            document.getElementById('gameScreen').style.display = 'block';
+            
+            const playerData = gameData.players[playerId];
+            playerCards = playerData.cards || [];
+            
+            updateGameUI();
+        }
+
+        function updateGameUI() {
+            const currentPlayerId = gameData.currentPlayer;
+            const currentPlayer = gameData.players[currentPlayerId];
+            const isMyTurn = currentPlayerId === playerId;
+            
+            document.getElementById('currentPlayer').textContent = currentPlayer.nickname;
+            document.getElementById('coins').textContent = gameData.players[playerId].coins;
+            
+            // Update player cards
+            const cardsContainer = document.getElementById('playerCards');
+            cardsContainer.innerHTML = '';
+            
+            playerCards.forEach((card, index) => {
+                if (gameData.players[playerId].revealed[index]) {
+                    cardsContainer.innerHTML += `
+                        <div class="card" style="background: #ff0000; color: white;">
+                            X
+                        </div>
+                    `;
+                } else {
+                    cardsContainer.innerHTML += `
+                        <div class="card" onclick="revealCard(${index})">
+                            ${CHARACTER_SYMBOLS[card] || '?'}
+                        </div>
+                    `;
+                }
+            });
+            
+            // Update opponents
+            const opponentsContainer = document.getElementById('opponents');
+            opponentsContainer.innerHTML = '<h3>Opponents:</h3>';
+            
+            Object.entries(gameData.players).forEach(([id, player]) => {
+                if (id !== playerId) {
+                    const revealedCount = player.revealed.filter(Boolean).length;
+                    opponentsContainer.innerHTML += `
+                        <div class="player">
+                            ${player.nickname} 
+                            (${2 - revealedCount} cards, ${player.coins} coins)
+                        </div>
+                    `;
+                }
+            });
+            
+            // Update action buttons
+            const actionButtons = document.getElementById('actionButtons');
+            actionButtons.style.display = isMyTurn ? 'block' : 'none';
+            
+            // Update game log
+            const gameLog = document.getElementById('gameLog');
+            gameLog.innerHTML = (gameData.gameLog || []).join('<br>');
+            gameLog.scrollTop = gameLog.scrollHeight;
+        }
+
+        function takeAction(action) {
+            if (gameData.currentPlayer !== playerId) return;
+            
+            const newLog = [...(gameData.gameLog || []), `${gameData.players[playerId].nickname} uses ${action}`];
+            
+            database.ref(`rooms/${roomId}`).update({
+                gameLog: newLog,
+                lastAction: action,
+                actionPlayer: playerId
+            });
+        }
+
+        function revealCard(index) {
+            if (gameData.currentPlayer !== playerId) return;
+            
+            const revealed = [...gameData.players[playerId].revealed;
+            revealed[index] = true;
+            
+            database.ref(`rooms/${roomId}/players/${playerId}`).update({
+                revealed: revealed
+            });
+        }
+
+        function shuffleArray(array) {
+            const newArray = [...array];
+            for (let i = newArray.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
+            }
+            return newArray;
+        }
+    </script>
+</body>
+</html>
