@@ -31,6 +31,12 @@
         button:disabled {
             background: #4a4a4a;
         }
+        input {
+            padding: 10px;
+            border-radius: 5px;
+            border: none;
+            margin: 10px;
+        }
         .player {
             display: inline-block;
             background: rgba(255, 255, 255, 0.1);
@@ -53,8 +59,10 @@
             cursor: pointer;
             box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
         }
-        .actions {
-            margin-top: 20px;
+        #roomId {
+            font-weight: bold;
+            color: #4CAF50;
+            font-size: 1.2em;
         }
         #gameLog {
             height: 100px;
@@ -72,12 +80,12 @@
 <body>
     <div class="room" id="lobby">
         <h1>🎴 Coup Game</h1>
-        <p>Room ID: <strong id="roomId">...</strong></p>
-        <input type="text" id="nickname" placeholder="Your nickname">
-        <button onclick="joinRoom()">Join Room</button>
+        <p>Room ID: <span id="roomId">----</span></p>
+        <input type="text" id="nickname" placeholder="Your nickname" required>
+        <button onclick="joinRoom()" id="joinBtn">Join Room</button>
         
         <div id="playersList"></div>
-        <button id="startBtn" onclick="startGame()" disabled>Start Game (3/5)</button>
+        <button id="startBtn" onclick="startGame()" disabled>Start Game (<span id="playerCount">0</span>/5)</button>
     </div>
 
     <div class="room" id="gameScreen" style="display: none;">
@@ -103,7 +111,7 @@
     </div>
 
     <script>
-        // Firebase configuration - replace with your own
+        // Firebase configuration
         const firebaseConfig = {
             apiKey: "AIzaSyDKcOb1P4fXeo2c5wNF3hm_YzgLutLTD5o",
             authDomain: "coup5game.firebaseapp.com",
@@ -120,55 +128,62 @@
         const database = firebase.database();
 
         // Game variables
-        let roomId = window.location.hash.substring(1) || generateRoomId();
-        let playerId = generatePlayerId();
+        let roomId;
+        let playerId;
         let isHost = false;
         let gameData = {};
         let playerCards = [];
-
-        // Character cards
         const CHARACTERS = ['Duke', 'Assassin', 'Captain', 'Ambassador', 'Contessa'];
         const CHARACTER_SYMBOLS = {
             'Duke': '🏰', 'Assassin': '🗡️', 'Captain': '🏴‍☠️', 
             'Ambassador': '🎩', 'Contessa': '👑'
         };
 
-        // Initialize the game
+        // Initialize game
         document.addEventListener('DOMContentLoaded', () => {
+            roomId = window.location.hash.substring(1) || generateRoomId();
+            window.location.hash = roomId;
             document.getElementById('roomId').textContent = roomId;
+            playerId = 'player_' + Date.now();
         });
 
         function generateRoomId() {
-            return Math.random().toString(36).substring(2, 6).toUpperCase();
-        }
-
-        function generatePlayerId() {
-            return 'player_' + Math.random().toString(36).substring(2, 6);
+            return Math.floor(1000 + Math.random() * 9000).toString();
         }
 
         function joinRoom() {
             const nickname = document.getElementById('nickname').value.trim();
-            if (!nickname) return alert('Please enter a nickname!');
+            if (!nickname) {
+                alert('Please enter a nickname!');
+                return;
+            }
+
+            const joinBtn = document.getElementById('joinBtn');
+            joinBtn.disabled = true;
+            joinBtn.textContent = 'Joining...';
 
             const playerRef = database.ref(`rooms/${roomId}/players/${playerId}`);
             
             playerRef.set({
                 nickname: nickname,
                 isHost: false,
-                ready: false,
                 coins: 2,
                 cards: [],
-                revealed: []
-            });
-
-            // Listen for room changes
-            database.ref(`rooms/${roomId}`).on('value', (snapshot) => {
-                gameData = snapshot.val() || {};
-                updateLobby();
-                
-                if (gameData.gameStarted) {
-                    startGameUI();
-                }
+                revealed: [],
+                joinedAt: firebase.database.ServerValue.TIMESTAMP
+            }).then(() => {
+                database.ref(`rooms/${roomId}`).on('value', (snapshot) => {
+                    gameData = snapshot.val() || {};
+                    updateLobby();
+                    
+                    if (gameData.gameStarted) {
+                        startGameUI();
+                    }
+                });
+            }).catch((error) => {
+                console.error("Error joining room:", error);
+                joinBtn.disabled = false;
+                joinBtn.textContent = 'Join Room';
             });
         }
 
@@ -178,6 +193,8 @@
             container.innerHTML = '<h3>Players:</h3>';
             
             let playerCount = 0;
+            let hostExists = false;
+            
             Object.entries(players).forEach(([id, player]) => {
                 container.innerHTML += `
                     <div class="player">
@@ -186,35 +203,41 @@
                 `;
                 playerCount++;
                 
-                if (id === playerId) {
-                    isHost = player.isHost;
-                }
+                if (player.isHost) hostExists = true;
+                if (id === playerId) isHost = player.isHost;
             });
 
-            document.getElementById('startBtn').disabled = !(isHost && playerCount >= 3);
-            document.getElementById('startBtn').textContent = `Start Game (${playerCount}/5)`;
+            if (playerCount === 1 && !hostExists) {
+                database.ref(`rooms/${roomId}/players/${playerId}`).update({ isHost: true });
+                isHost = true;
+            }
+
+            document.getElementById('playerCount').textContent = playerCount;
+            document.getElementById('startBtn').disabled = !(isHost && playerCount >= 2);
         }
 
         function startGame() {
             if (!isHost) return;
             
-            // Initialize game state
             const players = gameData.players || {};
             const playerIds = Object.keys(players);
-            const allCards = shuffleArray([...CHARACTERS, ...CHARACTERS, ...CHARACTERS]);
+            const allCards = [];
             
-            // Deal cards to players
+            CHARACTERS.forEach(char => {
+                allCards.push(char, char, char); // 3 of each character
+            });
+            
+            shuffleArray(allCards);
+            
             playerIds.forEach((id, index) => {
                 const cards = allCards.slice(index * 2, index * 2 + 2);
                 database.ref(`rooms/${roomId}/players/${id}`).update({
                     cards: cards,
                     revealed: [false, false],
-                    coins: 2,
-                    ready: false
+                    coins: 2
                 });
             });
             
-            // Set first player
             database.ref(`rooms/${roomId}`).update({
                 gameStarted: true,
                 currentPlayer: playerIds[0],
@@ -241,7 +264,6 @@
             document.getElementById('currentPlayer').textContent = currentPlayer.nickname;
             document.getElementById('coins').textContent = gameData.players[playerId].coins;
             
-            // Update player cards
             const cardsContainer = document.getElementById('playerCards');
             cardsContainer.innerHTML = '';
             
@@ -261,7 +283,6 @@
                 }
             });
             
-            // Update opponents
             const opponentsContainer = document.getElementById('opponents');
             opponentsContainer.innerHTML = '<h3>Opponents:</h3>';
             
@@ -277,11 +298,8 @@
                 }
             });
             
-            // Update action buttons
-            const actionButtons = document.getElementById('actionButtons');
-            actionButtons.style.display = isMyTurn ? 'block' : 'none';
+            document.getElementById('actionButtons').style.display = isMyTurn ? 'block' : 'none';
             
-            // Update game log
             const gameLog = document.getElementById('gameLog');
             gameLog.innerHTML = (gameData.gameLog || []).join('<br>');
             gameLog.scrollTop = gameLog.scrollHeight;
@@ -302,7 +320,7 @@
         function revealCard(index) {
             if (gameData.currentPlayer !== playerId) return;
             
-            const revealed = [...gameData.players[playerId].revealed;
+            const revealed = [...gameData.players[playerId].revealed];
             revealed[index] = true;
             
             database.ref(`rooms/${roomId}/players/${playerId}`).update({
@@ -311,12 +329,11 @@
         }
 
         function shuffleArray(array) {
-            const newArray = [...array];
-            for (let i = newArray.length - 1; i > 0; i--) {
+            for (let i = array.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
-                [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
+                [array[i], array[j]] = [array[j], array[i]];
             }
-            return newArray;
+            return array;
         }
     </script>
 </body>
