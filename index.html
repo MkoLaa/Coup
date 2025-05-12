@@ -14,7 +14,7 @@
             background: #16213e;
             border-radius: 15px;
             padding: 20px;
-            max-width: 500px;
+            max-width: 600px;
             margin: 0 auto;
             box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
         }
@@ -47,17 +47,26 @@
         }
         .card {
             display: inline-block;
-            width: 60px;
-            height: 90px;
-            background: white;
-            color: black;
+            width: 120px;
+            height: 180px;
+            background-size: cover;
+            background-position: center;
             border-radius: 8px;
             margin: 5px;
-            line-height: 90px;
-            font-size: 20px;
-            font-weight: bold;
             cursor: pointer;
             box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+        }
+        .card-back {
+            background: url('https://via.placeholder.com/120x180/333/fff?text=Coup') no-repeat;
+            background-size: cover;
+        }
+        .card-revealed {
+            background-color: #ff0000;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
         }
         #roomId {
             font-weight: bold;
@@ -72,6 +81,12 @@
             border-radius: 5px;
             margin-top: 20px;
             text-align: left;
+        }
+        .actions {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 10px;
         }
     </style>
     <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-app-compat.js"></script>
@@ -134,9 +149,12 @@
         let gameData = {};
         let playerCards = [];
         const CHARACTERS = ['Duke', 'Assassin', 'Captain', 'Ambassador', 'Contessa'];
-        const CHARACTER_SYMBOLS = {
-            'Duke': '🏰', 'Assassin': '🗡️', 'Captain': '🏴‍☠️', 
-            'Ambassador': '🎩', 'Contessa': '👑'
+        const CHARACTER_IMAGES = {
+            'Duke': 'images/coup/Duke.jpg',
+            'Assassin': 'images/coup/Assassin.jpg',
+            'Captain': 'images/coup/Captain.jpg',
+            'Ambassador': 'images/coup/Ambassador.jpg',
+            'Contessa': 'images/coup/Contessa.jpg'
         };
 
         // Initialize game
@@ -270,14 +288,14 @@
             playerCards.forEach((card, index) => {
                 if (gameData.players[playerId].revealed[index]) {
                     cardsContainer.innerHTML += `
-                        <div class="card" style="background: #ff0000; color: white;">
+                        <div class="card card-revealed">
                             X
                         </div>
                     `;
                 } else {
                     cardsContainer.innerHTML += `
-                        <div class="card" onclick="revealCard(${index})">
-                            ${CHARACTER_SYMBOLS[card] || '?'}
+                        <div class="card" onclick="revealCard(${index})" 
+                             style="background-image: url('${CHARACTER_IMAGES[card]}')">
                         </div>
                     `;
                 }
@@ -298,7 +316,7 @@
                 }
             });
             
-            document.getElementById('actionButtons').style.display = isMyTurn ? 'block' : 'none';
+            document.getElementById('actionButtons').style.display = isMyTurn ? 'flex' : 'none';
             
             const gameLog = document.getElementById('gameLog');
             gameLog.innerHTML = (gameData.gameLog || []).join('<br>');
